@@ -1,4 +1,5 @@
 var YTLC = function() {
+	console.error("[YTLC] YARRRP");
 	var Comment = function(author, text, timeText, id) {
 		const idPrefix = 'comment_';
 		var parseTime = function(t) {
@@ -28,6 +29,7 @@ var YTLC = function() {
 		const timeRegex = new RegExp("(?:[^:\\d]|^)((?:\\d{1,2}:[0-5]|[0-5]?)\\d:[0-5]\\d)", "g");
 		const videoIdRegex = new RegExp("(?:youtube(?:-nocookie)?\\.com\\/(?:[^\\/\\n\\s]+\\"
 			+ "/\\S+\\/|(?:v|e(?:mbed)?)\\/|\\S*?[?&]v=)|youtu\\.be\\/)([a-zA-Z0-9_-]{11})");
+		const apiRegex = /^AIza[a-zA-Z0-9\_]{35}$/;
 		var msgNum = 0;
 		var vid = null;
 		var unzipMatches = function(a, s) {
@@ -40,33 +42,72 @@ var YTLC = function() {
 			var m = videoIdRegex.exec(window.location.href);
 			return m ? m[1] : null;
 		};
+		var invidiousRequest = async function(host) {
+			return async function(vidID, cb) {
+				var url = host + "/api/v1/comments/" + vidID + "?fields=continuation,comments/author,comments/content"
+				var l = [];
+				try {
+					var cnt = "";
+					do {
+						var promise = await fetch(url + cnt);
+						var res = await promise.json();
+						if (res.comments) {
+							var r = res.comments.reduce((a, e) => unzipMatches(a, e), [])
+								.sort((a, b) => a.getTime() - b.getTime());
+							l = l.concat(r);
+							if (getVideoID() != vidID) {
+								break;
+							}
+							cb(l);
+						}
+						cnt = "&continuation=" + res.continuation;
+					} while(!!res.continuation);
+				} catch (e) {
+					console.error("[YTLC] Error occured during fetch(): " + e);
+					return;
+				}
+			};
+		};
+		var ytApiRequest = async function() {
+			var apikey = await browser.storage.local.get("ytlcApiKey");
+			var apikey = apikey ? apikey.ytlcApiKey : null;
+			if (!apikey || !apiRegex.test(apikey)) {
+				console.error("[YTLC] Invalid API key \"" + apikey + "\".");
+				return async function(vidID, cb) {
+					console.error("[YTLC] Cannot complete request; API key is invalid.");
+				};
+			}
+			return async function(vidID, cb) {
+				var url = "https://www.googleapis.com/youtube/v3/commentThreads?key=" + apikey
+					+ "&textFormat=plainText&order=relevance&part=snippet&maxResults=100&videoId="
+					+ vidID;
+				var j;
+				try {
+					var promise = await fetch(url);
+					j = await promise.json();
+				} catch (e) {
+					console.error("[YTLC] Error occured during fetch(): " + e);
+					return;
+				}
+				var r = j.items
+					.map(e => e.snippet.topLevelComment.snippet)
+					.map(e => {return {
+						author: e.authorDisplayName,
+						content: e.textOriginal
+					};})
+					.reduce((a, e) => unzipMatches(a, e), [])
+					.sort((a, b) => a.getTime() - b.getTime());
+				cb(r);
+			};
+		};
 		this.request = async function() {
 			var vidID = getVideoID();
 			if (!vidID) return;
 			if (vid == vidID) return;
 			vid = vidID;
-			var url = "https://invidio.us/api/v1/comments/" + vidID + "?fields=continuation,comments/author,comments/content"
-			var l = [];
-			try {
-				var cnt = "";
-				do {
-					var promise = await fetch(url + cnt);
-					var res = await promise.json();
-					if (res.comments) {
-						var r = res.comments.reduce((a, e) => unzipMatches(a, e), [])
-							.sort((a, b) => a.getTime() - b.getTime());
-						l = l.concat(r);
-						if (getVideoID() != vidID) {
-							break;
-						}
-						callback(l);
-					}
-					cnt = "&continuation=" + res.continuation;
-				} while(!!res.continuation);
-			} catch (e) {
-				console.error("[YTLC] Error occured during fetch(): " + e);
-				return;
-			}
+			// let fn = await invidiousRequest("https://invidio.us");
+			let fn = await ytApiRequest();
+			fn(vidID, callback);
 		};
 		this.request();
 	};

@@ -1,9 +1,9 @@
 {
 	"manifest_version": 2,
 	"name": "YouTube Live Comments",
-	"version": "0.5.4",
+	"version": "0.5.5",
 	"description": "Shows YouTube comments with timestamps on the video during playback.",
-	"permissions": ["https://invidio.us/*"],
+	"permissions": ["storage", "https://www.googleapis.com/*"],
 	"icons": {
 		  "16":  "logo/logo16.png",
 		  "32":  "logo/logo32.png",
@@ -14,10 +14,15 @@
 		 "512":  "logo/logo512.png",
 		"1024":  "logo/logo1024.png"
 	},
+	"options_ui": {
+		"page": "options.html",
+		"browser_style": true
+	},
 	"content_scripts": [{
 		"matches": ["*://*.youtube.com/*"],
 		"js": ["ytlc.js"]
 	}],
+	"background": {"scripts": ["bg.js"]},
 	"applications": {
 		"gecko": {"id": "{5197e2c1-ab78-4500-bfe4-e8d37b486d4d}"}
 	}
