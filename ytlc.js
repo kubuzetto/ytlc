@@ -41,9 +41,9 @@ var YTLC = function() {
 				let commentElem = comment.querySelector
 					('#content yt-formatted-string#content-text');
 				let commentText = commentElem.innerText;
-				let commentMarkup = commentElem.innerHTML;
+				// let commentMarkup = commentElem.innerHTML;
 				var m; while(m = timeRegex.exec(commentText))
-					c.push(new Comment(author, commentMarkup, m[1]));
+					c.push(new Comment(author, /*commentMarkup*/ commentText, m[1]));
 			}
 			return c.sort((x, y) => x.getTime() - y.getTime());
 		};
@@ -238,9 +238,7 @@ var YTLC = function() {
 					msg.appendChild(sp);
 				}
 				ft = true;
-				var sp = document.createElement('span');
-				sp.innerHTML = h;
-				msg.appendChild(sp);
+				msg.appendChild(document.createTextNode(h));
 			}
 			div.appendChild(msg);
 			div.style.padding = '5px';
