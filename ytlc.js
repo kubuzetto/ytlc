@@ -1,13 +1,16 @@
 var YTLC = function() {
-	console.error("[YTLC] YARRRP");
-	var Comment = function(author, text, timeText, id) {
+	var Comment = function(author, text, timeText) {
 		const idPrefix = 'comment_';
+		const hash = function(s) {
+			for(var i = 0, h = 0; i < s.length; i++)
+				h = Math.imul(31, h) + s.charCodeAt(i) | 0;
+			return h;
+		};
 		var parseTime = function(t) {
-			return t.split(':')
-				.map(e => parseInt(e))
+			return t.split(':').map(e => parseInt(e))
 				.reduce((a, e) => a * 60 + e, 0);
 		};
-		var identifier = idPrefix + id;
+		var identifier = idPrefix + hash(author + ":" + text);
 		var time = parseTime(timeText);
 		this.getAuthor = function() {
 			return author;
@@ -26,89 +29,38 @@ var YTLC = function() {
 		};
 	};
 	var CommentsRequester = function(callback) {
-		const timeRegex = new RegExp("(?:[^:\\d]|^)((?:\\d{1,2}:[0-5]|[0-5]?)\\d:[0-5]\\d)", "g");
-		const videoIdRegex = new RegExp("(?:youtube(?:-nocookie)?\\.com\\/(?:[^\\/\\n\\s]+\\"
-			+ "/\\S+\\/|(?:v|e(?:mbed)?)\\/|\\S*?[?&]v=)|youtu\\.be\\/)([a-zA-Z0-9_-]{11})");
-		const apiRegex = /^AIza[a-zA-Z0-9\_]{35}$/;
-		var msgNum = 0;
-		var vid = null;
-		var unzipMatches = function(a, s) {
-			var m;
-			while(m = timeRegex.exec(s.content))
-				a.push(new Comment(s.author, s.content, m[1], ++msgNum));
-			return a;
-		};
-		var getVideoID = function() {
-			var m = videoIdRegex.exec(window.location.href);
-			return m ? m[1] : null;
-		};
-		var invidiousRequest = async function(host) {
-			return async function(vidID, cb) {
-				var url = host + "/api/v1/comments/" + vidID + "?fields=continuation,comments/author,comments/content"
-				var l = [];
-				try {
-					var cnt = "";
-					do {
-						var promise = await fetch(url + cnt);
-						var res = await promise.json();
-						if (res.comments) {
-							var r = res.comments.reduce((a, e) => unzipMatches(a, e), [])
-								.sort((a, b) => a.getTime() - b.getTime());
-							l = l.concat(r);
-							if (getVideoID() != vidID) {
-								break;
-							}
-							cb(l);
-						}
-						cnt = "&continuation=" + res.continuation;
-					} while(!!res.continuation);
-				} catch (e) {
-					console.error("[YTLC] Error occured during fetch(): " + e);
-					return;
-				}
-			};
-		};
-		var ytApiRequest = async function() {
-			var apikey = await browser.storage.local.get("ytlcApiKey");
-			var apikey = apikey ? apikey.ytlcApiKey : null;
-			if (!apikey || !apiRegex.test(apikey)) {
-				console.error("[YTLC] Invalid API key \"" + apikey + "\".");
-				return async function(vidID, cb) {
-					console.error("[YTLC] Cannot complete request; API key is invalid.");
-				};
+		const pollt = 250;
+		const timeRegex = new RegExp
+			("(?:[^:\\d]|^)((?:\\d{1,2}:[0-5]|[0-5]?)\\d:[0-5]\\d)", "g");
+		const cc = 'ytd-comment-thread-renderer>ytd-comment-renderer>#body>#main';
+		const parseCmt = function(ct) {
+			let c = [];
+			for (let comment of ct) {
+				let author = comment.querySelector
+					('#header #author-text span').innerText;
+				let commentElem = comment.querySelector
+					('#content yt-formatted-string#content-text');
+				let commentText = commentElem.innerText;
+				let commentMarkup = commentElem.innerHTML;
+				var m; while(m = timeRegex.exec(commentText))
+					c.push(new Comment(author, commentMarkup, m[1]));
 			}
-			return async function(vidID, cb) {
-				var url = "https://www.googleapis.com/youtube/v3/commentThreads?key=" + apikey
-					+ "&textFormat=plainText&order=relevance&part=snippet&maxResults=100&videoId="
-					+ vidID;
-				var j;
-				try {
-					var promise = await fetch(url);
-					j = await promise.json();
-				} catch (e) {
-					console.error("[YTLC] Error occured during fetch(): " + e);
-					return;
-				}
-				var r = j.items
-					.map(e => e.snippet.topLevelComment.snippet)
-					.map(e => {return {
-						author: e.authorDisplayName,
-						content: e.textOriginal
-					};})
-					.reduce((a, e) => unzipMatches(a, e), [])
-					.sort((a, b) => a.getTime() - b.getTime());
-				cb(r);
-			};
+			return c.sort((x, y) => x.getTime() - y.getTime());
 		};
-		this.request = async function() {
-			var vidID = getVideoID();
-			if (!vidID) return;
-			if (vid == vidID) return;
-			vid = vidID;
-			// let fn = await invidiousRequest("https://invidio.us");
-			let fn = await ytApiRequest();
-			fn(vidID, callback);
+		const scrapeComments = function(fn) {
+			var cmt = document.querySelector('ytd-comments');
+			if (cmt && cmt.wrappedJSObject.loadComments) {
+				new MutationObserver(function(ms) {
+					let res = cmt.querySelectorAll(cc);
+					let cmts = parseCmt(res);
+					fn(cmts);
+					if (cmts.length < 100 && res.length < 1000)
+						cmt.wrappedJSObject.loadComments();
+				}).observe(cmt, {subtree: true, childList: true});
+				cmt.wrappedJSObject.loadComments();
+			} else setTimeout(() => scrapeComments(fn), pollt);
 		};
+		this.request = () => scrapeComments(callback);
 		this.request();
 	};
 	var TimeTracker = function(callback) {
@@ -153,18 +105,14 @@ var YTLC = function() {
 			if (!tf) return;
 			var q = tf();
 			if (!q) return;
-			var l = q.duration;
-			var ranges = comments
-				.map(t => t.getTime())
-				.map(t => [
-					Math.max(0, t - maxTimeDiff) / l,
-					Math.min(l, t + maxTimeDiff) / l
-				]);
-			viewer.refreshProgressBar(ranges);
+			viewer.refreshProgressBar(comments.map(t => t.getTime()), Math.round(q.duration)|0);
 		};
 		init(callback);
 	};
 	var CommentsView = function() {
+		const coeffs = new Array(6);
+		for (let i = 0; i < 6; i++)
+			coeffs[i] = Math.pow(Math.cos(i / 12.0 * Math.PI), 2);
 		const attrnm = 'ytlcfade';
 		var container = null;
 		var pc = null;
@@ -200,7 +148,7 @@ var YTLC = function() {
 				s.display = 'inline-block';
 				s.fontSize = '18px';
 				s.textShadow = '0px 0px 2px #000000';
-				s.bottom = '60px';
+				s.bottom = '75px';
 				s.right = '10px';
 				s.zIndex = 70;
 				s.textAlign = 'right';
@@ -211,34 +159,59 @@ var YTLC = function() {
 			makeProgressMarkBar();
 		};
 		var makeProgressMarkBar = function() {
-			pc = document.createElement('div');
+			pc = document.createElement('canvas');
 			var s = pc.style;
 				s.position = 'absolute';
 				s.display = 'block';
 				s.width = '100%';
-				s.height = '5px';
+				s.height = '25px';
 				s.zIndex = 70;
-				s.top = '-5px';
+				s.top = '-25px';
 				s.left = '0';
+				s.pointerEvents = 'none';
 		};
-		var makeProgressMark = function(a) {
-			var m = document.createElement('div');
-			var s = m.style;
-				s.position = 'absolute';
-				s.display = 'block';
-				s.top = '0px';
-				s.height = '100%';
-				s.background = 'rgba(120, 255, 0, 0.4)';
-				s.left = '' + (a[0] * 100.0).toPrecision(5) + '%';
-				s.width = '' + ((a[1] - a[0]) * 100.0).toPrecision(5) + '%';
-			if (pc) pc.appendChild(m);
-		};
-		this.refreshProgressBar = function(marks) {
+		this.refreshProgressBar = function(pts, l) {
 			if (!pc) return;
-			while(pc.firstChild)
-				pc.removeChild(pc.firstChild);
-			for(a of marks)
-				makeProgressMark(a);
+			var marks = new Array(l * 2).fill(0);
+			for (x of pts) {
+				let t = x * 2;
+				marks[t] += coeffs[0];
+				for (let i = 1; i < coeffs.length; i++) {
+					if (t + i < marks.length) marks[t + i] += coeffs[i];
+					if (t - i >= 0) marks[t - i] += coeffs[i];
+				}
+			}
+			var max = 1; for (x of marks) if (x > max) max = x;
+			var ctx = pc.getContext('2d');
+			var positionInfo = pc.getBoundingClientRect();
+			var h = positionInfo.height;
+			var w = positionInfo.width;
+			pc.width = w;
+			pc.height = h;
+			var grad= ctx.createLinearGradient(0, 0, 0, h);
+			grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+			grad.addColorStop(0.33, 'rgba(255, 255, 255, 1)');
+			ctx.strokeStyle = grad;
+			for (p of pts) {
+				let x = w * 2 * p / (marks.length - 1);
+				ctx.beginPath();
+				ctx.moveTo(x, 0);
+				ctx.lineTo(x, h);
+				ctx.stroke();
+			}
+			ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'
+			ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)'
+			ctx.beginPath();
+			ctx.moveTo(0, h);
+			for (let i = 0; i < marks.length; i++) {
+				let lh = 1 - marks[i] / max;
+				let y = h * Math.pow(lh, 2);
+				let x = w * i / (marks.length - 1);
+				ctx.lineTo(x, y);
+			}
+			ctx.lineTo(w, h);
+			ctx.fill();
+			ctx.stroke();
 		};
 		var makeCommentDiv = function(e) {
 			var cnt = document.createElement('div');
@@ -265,7 +238,9 @@ var YTLC = function() {
 					msg.appendChild(sp);
 				}
 				ft = true;
-				msg.appendChild(document.createTextNode(h));
+				var sp = document.createElement('span');
+				sp.innerHTML = h;
+				msg.appendChild(sp);
 			}
 			div.appendChild(msg);
 			div.style.padding = '5px';
@@ -343,7 +318,10 @@ var YTLC = function() {
 		var tracker   = new TimeTracker((x, a, b) => viewer.update(a, b));
 		var requester = new CommentsRequester(r => {
 			tracker.setComments(r);
-			tracker.markTimes(viewer);
+			var f = () => tracker.markTimes(viewer);
+			f();
+			window.addEventListener("resize", f);
+			window.addEventListener("fullscreenchange", f);
 		});
 		new PageTracker((player, getTimeFunc, pbar) => {
 			viewer.attachTo(player, pbar);
