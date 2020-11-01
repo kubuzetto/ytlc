@@ -47,17 +47,20 @@ var YTLC = function() {
 			}
 			return c.sort((x, y) => x.getTime() - y.getTime());
 		};
+		const unwr = function(elem) {
+			return elem.wrappedJSObject || elem;
+		};
 		const scrapeComments = function(fn) {
 			var cmt = document.querySelector('ytd-comments');
-			if (cmt && cmt.wrappedJSObject.loadComments) {
+			if (cmt && unwr(cmt).loadComments) {
 				new MutationObserver(function(ms) {
 					let res = cmt.querySelectorAll(cc);
 					let cmts = parseCmt(res);
 					fn(cmts);
 					if (cmts.length < 100 && res.length < 1000)
-						cmt.wrappedJSObject.loadComments();
+						unwr(cmt).loadComments();
 				}).observe(cmt, {subtree: true, childList: true});
-				cmt.wrappedJSObject.loadComments();
+				unwr(cmt).loadComments();
 			} else setTimeout(() => scrapeComments(fn), pollt);
 		};
 		this.request = () => scrapeComments(callback);
@@ -110,6 +113,7 @@ var YTLC = function() {
 		init(callback);
 	};
 	var CommentsView = function() {
+		var active = true;
 		const coeffs = new Array(6);
 		for (let i = 0; i < 6; i++)
 			coeffs[i] = Math.pow(Math.cos(i / 12.0 * Math.PI), 2);
@@ -141,11 +145,14 @@ var YTLC = function() {
 			}
 			requestAnimationFrame(animLoop);
 		};
+		var updateVisibility = function() {
+			if (container) container.style.display = active ? 'inline-block' : 'none';
+			if (pc) pc.style.display = active ? 'block' : 'none';
+		};
 		var init = function() {
 			container = document.createElement('div');
 			var s = container.style;
 				s.position = 'absolute';
-				s.display = 'inline-block';
 				s.fontSize = '18px';
 				s.textShadow = '0px 0px 2px #000000';
 				s.bottom = '75px';
@@ -156,25 +163,23 @@ var YTLC = function() {
 				s.width = '50%';
 			container.className = 'annotation-type-text';
 			requestAnimationFrame(animLoop);
-			makeProgressMarkBar();
-		};
-		var makeProgressMarkBar = function() {
 			pc = document.createElement('canvas');
 			var s = pc.style;
 				s.position = 'absolute';
-				s.display = 'block';
 				s.width = '100%';
 				s.height = '25px';
 				s.zIndex = 70;
 				s.top = '-25px';
 				s.left = '0';
 				s.pointerEvents = 'none';
+			updateVisibility();
 		};
 		this.refreshProgressBar = function(pts, l) {
 			if (!pc) return;
 			var marks = new Array(l * 2).fill(0);
 			for (x of pts) {
 				let t = x * 2;
+				if (t < 0 || t >= marks.length) continue;
 				marks[t] += coeffs[0];
 				for (let i = 1; i < coeffs.length; i++) {
 					if (t + i < marks.length) marks[t + i] += coeffs[i];
@@ -188,7 +193,7 @@ var YTLC = function() {
 			var w = positionInfo.width;
 			pc.width = w;
 			pc.height = h;
-			var grad= ctx.createLinearGradient(0, 0, 0, h);
+			var grad = ctx.createLinearGradient(0, 0, 0, h);
 			grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
 			grad.addColorStop(0.33, 'rgba(255, 255, 255, 1)');
 			ctx.strokeStyle = grad;
@@ -276,6 +281,13 @@ var YTLC = function() {
 			if (player) player.appendChild(container);
 			if (pbar) pbar.appendChild(pc);
 		};
+		this.isActive = function() {
+			return active;
+		};
+		this.toggleActive = function() {
+			active = !active;
+			updateVisibility();
+		};
 		init();
 	};
 	var PageTracker = function(callback) {
@@ -326,6 +338,29 @@ var YTLC = function() {
 			tracker.setTimeFunc(getTimeFunc);
 			requester.request();
 		});
+		var addButton = function() {
+			var ctl = document.querySelector(".ytp-right-controls");
+			if (ctl) {
+				if (ctl.querySelector(".ytp-ytlc-toggle")) return;
+				var btn = document.createElement("button");
+				var updateButtonState = function() {
+					btn.setAttribute("aria-pressed", viewer.isActive() ? "true" : "false");
+				};
+				btn.className = "ytp-button ytp-ytlc-toggle";
+				btn.setAttribute("aria-label", "Live Comments");
+				updateButtonState();
+				var ico = document.createElement("img");
+				ico.src = "data:image/svg+xml,%3Csvg version='1.1' viewBox='-4 -4 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m4 4-0.86 0.14-0.14 0.86v6l0.14 0.86 0.86 0.14h5.4l0.88 1 1.4-0.078-0.69-0.92h1.1l0.86-0.14 0.14-0.86v-6l-0.14-0.86-0.86-0.14h-8zm0 1h8v6h-8v-6zm6.1 1.1 0.012 1.5 0.12 1 0.6 0.016 0.18-1 0.09-1.5-1-0.025zm-2.2 0.059a1.2 1.2 0 0 0-0.83 0.36 1.2 1.2 0 0 0-0.82-0.33 1.2 1.2 0 0 0-0.84 0.36 1.2 1.2 0 0 0 0.029 1.7l1.7 1.6 1.6-1.7a1.2 1.2 0 0 0-0.031-1.7 1.2 1.2 0 0 0-0.82-0.33zm2.7 2.8a0.5 0.5 0 0 0-0.51 0.49 0.5 0.5 0 0 0 0.49 0.51 0.5 0.5 0 0 0 0.51-0.49 0.5 0.5 0 0 0-0.49-0.51z' fill='%23fff'/%3E%3C/svg%3E%0A";
+				ico.style.height = "100%";
+				btn.appendChild(ico);
+				ctl.insertBefore(btn, ctl.firstChild);
+				btn.addEventListener("click", function (e) {
+					viewer.toggleActive();
+					updateButtonState();
+				});
+			} else setTimeout(addButton, 250);
+		};
+		addButton();
 	};
 	init();
 };
